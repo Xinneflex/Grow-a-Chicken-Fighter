@@ -9,13 +9,11 @@
 
     local Window = Fluent:CreateWindow({
         Title = "Grow a Chicken Fighter",
-        SubTitle = "by Xinneflex",
+        SubTitle = "by qtieq",
         Search = true,
         Icon = "egg",
         TabWidth = 160,
         Size = UDim2.fromOffset(450, 300),
-        -- Put every Dropdown popup outside the window, on the right edge,
-        -- vertically centered with the UI. FluentPlus handles the positioning.
         DropdownsOutsideWindow = true,
         Acrylic = true,
         Theme = "Aqua",
@@ -30,49 +28,50 @@
 
     task.defer(function()
         pcall(function()
-            local camera = workspace.CurrentCamera
-            if not camera then
+            local fluentGui = Fluent.GUI
+            if not fluentGui then
                 return
             end
 
-            local viewport = camera.ViewportSize
-            local isLandscapeTouch = userInputService.TouchEnabled and viewport.X > viewport.Y
+            local targetSize = UDim2.fromOffset(450, 300)
+            local sizeLockConnection
 
-            if not isLandscapeTouch then
-                return
-            end
-
-            local rootFrame
-            for _, instance in ipairs(Fluent.GUI:GetDescendants()) do
-                if instance:IsA("Frame")
-                    and instance.Size.X.Offset == 500
-                    and instance.Size.Y.Offset == 300 then
-                    rootFrame = instance
-                    break
-                end
-            end
-
-            if rootFrame then
-                local margin = 10
-                local scale = math.min(
-                    (viewport.X - 20) / 500,
-                    (viewport.Y - (margin * 2)) / 300
-                )
-
-                local uiScale = rootFrame:FindFirstChild("qtieqLandscapeScale")
-                if not uiScale then
-                    uiScale = Instance.new("UIScale")
-                    uiScale.Name = "qtieqLandscapeScale"
-                    uiScale.Parent = rootFrame
+            local function lockWindowSize()
+                local rootFrame
+                for _, instance in ipairs(fluentGui:GetDescendants()) do
+                    if instance:IsA("Frame")
+                        and instance.Size.X.Offset == 450
+                        and instance.Size.Y.Offset == 300 then
+                        rootFrame = instance
+                        break
+                    end
                 end
 
-                uiScale.Scale = math.clamp(scale, 0.60, 1)
+                if not rootFrame then
+                    return
+                end
+
+                rootFrame.Size = targetSize
+
+                if sizeLockConnection then
+                    sizeLockConnection:Disconnect()
+                end
+
+                sizeLockConnection = rootFrame:GetPropertyChangedSignal("Size"):Connect(function()
+                    if rootFrame.Size ~= targetSize then
+                        rootFrame.Size = targetSize
+                    end
+                end)
             end
+
+            lockWindowSize()
+
+            fluentGui.DescendantAdded:Connect(function()
+                task.defer(lockWindowSize)
+            end)
         end)
     end)
 
-    -- UI ONLY: make Fluent's internal ScrollingFrames touch-scrollable.
-    -- This does not alter any gameplay loop, remote, or Tower/Rebirth logic.
     task.defer(function()
         pcall(function()
             local fluentGui = Fluent.GUI
@@ -222,9 +221,6 @@
     getgenv().rebirthLimit = 0
     getgenv().towerDelaySeconds = 5
 
-    -- UFO priority: temporarily pauses ONLY Tower + Rebirth without toggling either option off.
-    -- When UFO starts, an active Tower is surrendered first; when UFO ends, both systems
-    -- naturally begin a fresh delay from 0 instead of carrying the previous countdown.
     getgenv().ufoPriorityActive = false
     getgenv().ufoPriorityTransitioning = false
     getgenv().autoScrapEnabled = false
@@ -358,8 +354,6 @@
         return ownedEggPositions
     end
 
-    -- Standstill Egg Collection: collect owned eggs without moving the character.
-    -- Uses the same physical touch pickup the game uses when the player walks onto an egg.
     local function collectEggStandstill(eggInstance)
         if not eggInstance then
             return
@@ -552,9 +546,6 @@
         return typeof(result) == "table" and result.ok == true
     end
 
-    -- UFO priority transition. This does NOT change the Tower/Rebirth toggles.
-    -- It only blocks their work while the UFO event is active and resets their delay
-    -- implicitly by forcing their loops to start a new countdown after the event ends.
     local function setUFOPriorityActive(active)
         active = active == true
 
@@ -565,7 +556,6 @@
 
             getgenv().ufoPriorityTransitioning = true
 
-            -- UFO starts: surrender immediately. Do not check TowerActive first.
             if remotesModule then
                 pcall(function()
                     remotesModule.invoke(remotesModule.defs.TowerSurrender)
@@ -582,7 +572,6 @@
             return
         end
 
-        -- UFO ended: clear the pause. Tower/Rebirth loops will start fresh timing.
         getgenv().ufoPriorityTransitioning = false
         getgenv().ufoPriorityActive = false
         getgenv().ufoPetCooldownUntil = os.clock() + 15
@@ -923,8 +912,6 @@
     local autoUFOLoopActive = false
     local ufoEventActive = false
     local ufoSequenceRunning = false
-    -- Saved active chicken for the current UFO round only.
-    -- This is captured once when the UFO round starts and reset when it ends.
     local ufoOriginalActiveChickenId = nil
     local ufoOriginalChickenCaptured = false
     local ufoPostEndCooldownUntil = 0
@@ -979,8 +966,6 @@
             return
         end
 
-        -- Keep the exact order supplied by the game's roster/inventory data.
-        -- Do not alphabetically sort the chicken list.
         local chickens = table.clone(roster.chickens or {})
 
         local options = {}
@@ -1000,8 +985,11 @@
 
         pcall(function()
             ufoChickenDropdown:SetValues(options)
+
             if selectedOption then
-                ufoChickenDropdown:SetValue(selectedOption)
+                ufoChickenDropdown:SetValue({selectedOption})
+            else
+                ufoChickenDropdown:SetValue({})
             end
         end)
     end
@@ -1099,8 +1087,6 @@
         end)
     end
 
-    -- UFO ended: if SetChickenOrder still exists, switch back to coop exactly once
-    -- before releasing the paused automation systems.
     local function fireCoopAfterUFO()
         local coopRemote = ufoRemotes:FindFirstChild("SetChickenOrder")
 
@@ -1123,13 +1109,8 @@
         end
 
         ufoEndHandled = true
-        -- Block delayed/duplicate LiveEvent start signals that can arrive after
-        -- the event has already ended and after the chicken has been restored.
         ufoPostEndCooldownUntil = os.clock() + 3
 
-        -- UFO ended: return to COOP first, then wait 1.5 seconds before
-        -- restoring the chicken that was active at the beginning of THIS round.
-        -- Keep Tower/Rebirth paused until the chicken restore has been attempted.
         fireCoopAfterUFO()
         task.wait(1.5)
         pcall(restoreUFOOriginalChicken)
@@ -1244,13 +1225,9 @@
 
         ufoSequenceRunning = true
 
-        -- Capture the active chicken once for this UFO round. Retries must NOT
-        -- overwrite it after the selected chicken has been deployed.
         captureUFOOriginalChicken()
 
         task.spawn(function()
-            -- If a chicken is selected, wait 1.5 seconds after UFO starts,
-            -- deploy that chicken, and only then allow Chaos.
             if ufoSelectedChickenId ~= nil and tostring(ufoSelectedChickenId) ~= "" then
                 task.wait(1.5)
 
@@ -1261,7 +1238,6 @@
 
                 local deployed = deploySelectedUFOChicken()
                 if not deployed then
-                    -- Never enter Chaos before the selected chicken is deployed.
                     ufoSequenceRunning = false
                     return
                 end
@@ -1306,7 +1282,6 @@
         end
     end
 
-    -- Explicit hooks kept for the known LiveEvent signal names.
     for _, name in ipairs({
         "LiveEventStarted",
         "LiveEventStateChanged",
@@ -1330,8 +1305,6 @@
         end
     end)
 
-    -- Also hook matching UFO/INVASION/LiveEvent RemoteEvents that exist under
-    -- ReplicatedStorage.Remotes, including ones added after the script starts.
     hookUFOEventRemotes()
 
     ufoRemotes.ChildAdded:Connect(function(child)
@@ -1368,9 +1341,6 @@
 
         task.spawn(function()
             while autoUFORunning do
-                -- Primary detection: ask the game's LiveEvent service which event is active.
-                -- The dump shows LiveEventGetActive exists as a RemoteFunction, so this
-                -- avoids depending entirely on the visible "TO CHAOS" text.
                 if os.clock() - lastLiveEventCheck >= 1 then
                     lastLiveEventCheck = os.clock()
 
@@ -1391,8 +1361,6 @@
                     ufoEventActive = false
                 end
 
-                -- Keep retrying the sequence if a start signal was missed or
-                -- the selected chicken could not be deployed on the first attempt.
                 if ufoEventActive and not ufoSequenceRunning then
                     startUFOSequence()
                 end
@@ -1404,10 +1372,6 @@
         end)
     end
 
-    -- ANTI AFK
-    -- Disables the LocalPlayer.Idled connections while enabled.
-    -- The exact connections disabled by this feature are remembered so they can
-    -- be restored when the Toggle is turned OFF or when the script is unloaded.
     local function getAFKConnections()
         local getter = getconnections or get_signal_cons
         if not getter then
@@ -1495,7 +1459,6 @@
 
         task.spawn(function()
             while getgenv().antiAFKEnabled do
-                -- Re-scan periodically so connections added later are also disabled.
                 pcall(disableAntiAFKConnections)
                 task.wait(2)
             end
@@ -1504,7 +1467,6 @@
         end)
     end
 
-    -- UNLOAD: stop all automation loops and destroy the UI.
     local function unloadScript()
         getgenv().autoCollectEggEnabled = false
         getgenv().autoHotEggEnabled = false
@@ -1552,16 +1514,11 @@
         getgenv().qtieqUnloaded = true
     end
 
-    -- Auto Sell child lists are declared before the collapse helper because the main
-    -- Auto Sell group also needs to reveal the nested selectable controls.
     local autoSellChildren = {}
     local autoSellRarityChildren = {}
     local autoSellKeepRarityChildren = {}
     local autoSellKeepMutationChildren = {}
 
-    -- COLLAPSIBLE CONTROL GROUPS / SEPARATE TOGGLE SWITCH
-    -- The row area controls expand/collapse (for grouped toggles only).
-    -- The switch area on the far right is the ONLY place that changes ON/OFF.
     local function setControlVisible(control, visible)
         if not control then return end
         pcall(function()
@@ -1581,8 +1538,6 @@
 
             local frame = toggle.Elements.Frame
 
-            -- Cover the whole row so FluentPlus' original row-click handler cannot
-            -- toggle the setting. Only the dedicated switch button below can do that.
             local oldRowButton = frame:FindFirstChild("qtieqToggleRowButton")
             if oldRowButton then
                 oldRowButton:Destroy()
@@ -1611,8 +1566,6 @@
                 end
             end)
 
-            -- Dedicated switch hitbox. It stays visually on top of Fluent's switch
-            -- but only toggles the Value; it never expands/collapses the group.
             local switchButton = Instance.new("TextButton")
             switchButton.Name = "qtieqToggleSwitchButton"
             switchButton.BackgroundTransparency = 1
@@ -1633,12 +1586,6 @@
         end)
     end
 
-    -- DROPDOWN INTERACTION
-    -- Only the [▼] area is allowed to open/close a dropdown.
-    -- Clicking the dropdown text/empty area does nothing.
-    -- Dropdown popups are handled by FluentPlus outside the window so they
-    -- stay at the right edge and are vertically centered.
-    -- The popup scroll position is also preserved instead of snapping back to 0.
     local function restoreDropdownScroll(dropdown)
         task.defer(function()
             pcall(function()
@@ -1649,9 +1596,6 @@
                 local popupFrame
                 local popupScroll
                 for _, guiChild in ipairs(Fluent.GUI:GetChildren()) do
-                    -- FluentPlus creates each dropdown popup as a direct Frame
-                    -- under Fluent.GUI. Do not require the original 300px height
-                    -- here because we resize the popup to match the actual UI.
                     if guiChild:IsA("Frame") and guiChild.Visible and guiChild.Size.X.Offset == 170 then
                         local candidateScroll = guiChild:FindFirstChildWhichIsA("ScrollingFrame", true)
                         if candidateScroll then
@@ -1666,9 +1610,6 @@
                     return
                 end
 
-                -- Keep the dropdown window exactly as tall as the visible UI.
-                -- This is especially important on mobile, where the main window
-                -- may be reduced by UIScale while FluentPlus' popup is not.
                 local windowFrame
                 for _, guiChild in ipairs(Fluent.GUI:GetDescendants()) do
                     if guiChild:IsA("Frame")
@@ -1684,13 +1625,11 @@
                     local targetHeight = math.max(1, math.floor(windowFrame.AbsoluteSize.Y + 0.5))
                     popupFrame.Size = UDim2.fromOffset(170, targetHeight)
 
-                    -- Re-center it beside the UI using the same rendered dimensions.
                     local targetX = windowFrame.AbsolutePosition.X + windowFrame.AbsoluteSize.X + 5
                     local targetY = windowFrame.AbsolutePosition.Y + (windowFrame.AbsoluteSize.Y - targetHeight) / 2
                     popupFrame.Position = UDim2.fromOffset(math.floor(targetX + 0.5), math.floor(targetY + 0.5))
                 end
 
-                -- No elastic bounce: when the user reaches the end, it stays there.
                 popupScroll.ElasticBehavior = Enum.ElasticBehavior.Never
                 popupScroll.Active = true
                 popupScroll.ScrollingEnabled = true
@@ -1730,8 +1669,6 @@
             local frame = dropdown.Elements.Frame
             local dropdownInner = nil
 
-            -- FluentPlus creates the dropdown's clickable area as the only
-            -- direct TextButton inside the dropdown element.
             for _, child in ipairs(frame:GetChildren()) do
                 if child:IsA("TextButton") then
                     dropdownInner = child
@@ -1753,8 +1690,6 @@
                 oldArrowButton:Destroy()
             end
 
-            -- Block the normal full-width FluentPlus click area.
-            -- The rightmost 28px is left free for the [▼] button.
             local textBlocker = Instance.new("TextButton")
             textBlocker.Name = "qtieqDropdownTextBlocker"
             textBlocker.BackgroundTransparency = 1
@@ -1767,7 +1702,6 @@
             textBlocker.ZIndex = 250
             textBlocker.Parent = dropdownInner
 
-            -- Dedicated [▼] hitbox. This is the ONLY place that opens/closes it.
             local arrowButton = Instance.new("TextButton")
             arrowButton.Name = "qtieqDropdownArrowButton"
             arrowButton.BackgroundTransparency = 1
@@ -1786,8 +1720,6 @@
                         dropdown:Close()
                     else
                         dropdown:Open()
-                        -- Wait until FluentPlus creates/shows the popup, then
-                        -- restore its last scroll position and disable bounce.
                         restoreDropdownScroll(dropdown)
                         task.delay(0.05, function()
                             restoreDropdownScroll(dropdown)
@@ -1818,7 +1750,6 @@
                 labelHolder.Size = UDim2.new(1, -66, 0, 0)
             end
 
-            -- Chevron: collapsed = >, expanded = v.
             local arrow = Instance.new("ImageLabel")
             arrow.Name = "qtieqCollapseArrow"
             arrow.BackgroundTransparency = 1
@@ -1849,14 +1780,11 @@
 
             end
 
-            -- Clicking the row (anywhere except the dedicated switch) only expands
-            -- or collapses the child menu. It does NOT change ON/OFF.
             setupToggleInteraction(mainToggle, function()
                 expanded = not expanded
                 refresh()
             end)
 
-            -- Start collapsed.
             refresh()
         end)
     end
@@ -1887,7 +1815,6 @@
 
             task.spawn(function()
                 while getgenv().autoTowerEnabled do
-                    -- UFO has priority: keep the Toggle ON, but pause Tower completely.
                     if getgenv().ufoPriorityActive or getgenv().ufoPriorityTransitioning then
                         task.wait(0.1)
                         continue
@@ -1898,18 +1825,13 @@
                         break
                     end
 
-                    -- หลัง Rebirth ต้องรอ 1 วิให้ครบก่อน
-                    -- จากนั้น Auto Tower จะเริ่มนับ Tower Delay ใหม่
                     if getgenv().autoTowerWaitingAfterRebirth then
                         task.wait(0.1)
                     elseif getgenv().autoRebirthEnabled and isRebirthPending() then
-                        -- Only Auto Rebirth may react to a ready Rebirth.
                         task.wait(0.1)
                     elseif isTowerRunActive() then
                         task.wait(1)
                     else
-                        -- Tower is inactive and Rebirth is not pending:
-                        -- wait the configured delay, then start the next Tower.
                         local towerDelay = tonumber(getgenv().towerDelaySeconds) or 5
                         towerDelay = math.clamp(towerDelay, 1, 60)
 
@@ -1945,6 +1867,28 @@
         end
     end)
 
+    local function shrinkInputField(input, width)
+        pcall(function()
+            if not input or not input.Frame then
+                return
+            end
+
+            local frame = input.Frame
+            frame.AutomaticSize = Enum.AutomaticSize.None
+            frame.Size = UDim2.fromOffset(width, 30)
+
+            local sizeConstraint = frame:FindFirstChild("XinneflexInputSizeConstraint")
+            if not sizeConstraint then
+                sizeConstraint = Instance.new("UISizeConstraint")
+                sizeConstraint.Name = "XinneflexInputSizeConstraint"
+                sizeConstraint.Parent = frame
+            end
+
+            sizeConstraint.MinSize = Vector2.new(width, 30)
+            sizeConstraint.MaxSize = Vector2.new(width, 30)
+        end)
+    end
+
     local TowerDelayInput = Tabs.Tower:AddInput("TowerDelayInput", {
         Title = "ดีเลย์ก่อนลงหอคอย",
         Default = "5",
@@ -1961,6 +1905,8 @@
         end
     })
 
+    shrinkInputField(TowerDelayInput, 70)
+
     local LastTower = Tabs.Tower:AddToggle("LastTower", {
         Title = "ลงหอคอยชั้นล่าสุด",
         Default = false
@@ -1976,7 +1922,6 @@
     })
 
     AutoRebirth:OnChanged(function(Value)
-        -- Rebirth Limit belongs to Auto Rebirth. Auto Tower alone ignores it.
         if Value and isRebirthLimitReached() then
             getgenv().autoRebirthEnabled = false
             pcall(function()
@@ -1992,14 +1937,11 @@
 
             task.spawn(function()
                 while getgenv().autoRebirthEnabled do
-                    -- Rebirth Limit has absolute priority: stop both Tower and Rebirth
-                    -- as soon as the current rebirth count reaches the configured limit.
                     if isRebirthLimitReached() then
                         disableTowerRebirthAtLimit()
                         break
                     end
 
-                    -- UFO has priority: keep Rebirth enabled, but do not start/rebirth during UFO.
                     if getgenv().ufoPriorityActive or getgenv().ufoPriorityTransitioning then
                         task.wait(0.1)
                         continue
@@ -2008,7 +1950,6 @@
                     local readySuccess, isReady = pcall(isRebirthReady)
 
                     if readySuccess and isReady and not getgenv().ufoPriorityActive and not getgenv().ufoPriorityTransitioning then
-                        -- Rebirth ready: send TowerSurrender first, without relying on TowerActive.
                         pcall(function()
                             remotesModule.invoke(remotesModule.defs.TowerSurrender)
                         end)
@@ -2021,9 +1962,6 @@
                         end
 
                         local fireSuccess, fireResult = false, false
-                        -- Check the limit again immediately before the actual Rebirth remote.
-                        -- This prevents a race where the count reaches the limit between
-                        -- the loop-start check and the Rebirth request.
                         if not isRebirthLimitReached()
                             and not getgenv().ufoPriorityActive
                             and not getgenv().ufoPriorityTransitioning then
@@ -2031,8 +1969,6 @@
                         end
 
                         if fireSuccess and fireResult and not getgenv().ufoPriorityActive and not getgenv().ufoPriorityTransitioning then
-                            -- Rebirth สำเร็จ: รอ 1 วินาทีก่อน
-                            -- แล้วค่อยเริ่มนับ Tower Delay ที่ตั้งไว้
                             getgenv().autoTowerWaitingAfterRebirth = true
                             task.wait(1)
                             getgenv().autoTowerWaitingAfterRebirth = false
@@ -2062,6 +1998,8 @@
         end
     })
 
+    shrinkInputField(RebirthLimitInput, 70)
+
     local AutoUFO = Tabs.Events:AddToggle("AutoUFO", {
         Title = "ลง UFO อัตโนมัติ",
         Default = false
@@ -2071,7 +2009,6 @@
         autoUFORunning = Value
 
         if Value then
-            -- The UFO chicken list is refreshed only by the manual refresh button.
             startAutoUFOLoop()
         else
             ufoEventActive = false
@@ -2082,13 +2019,53 @@
         end
     end)
 
+    local ufoChickenSelectionUpdating = false
+
     ufoChickenDropdown = Tabs.Events:AddDropdown("UFOChickenDropdown", {
         Title = "เลือกไก่",
         Values = {},
-        Multi = false,
-        Default = nil,
-        Callback = function(value)
-            ufoSelectedChickenId = ufoChickenOptionToId[value]
+        Multi = true,
+        Default = {},
+        Callback = function(values)
+            if ufoChickenSelectionUpdating then
+                return
+            end
+
+            local selectedOption = nil
+            local currentId = tostring(ufoSelectedChickenId or "")
+
+            if type(values) == "table" then
+                local fallbackOption = nil
+
+                for option, selected in pairs(values) do
+                    if selected == true then
+                        fallbackOption = fallbackOption or option
+
+                        local optionId = ufoChickenOptionToId[option]
+                        if tostring(optionId or "") ~= currentId then
+                            selectedOption = option
+                            break
+                        end
+                    end
+                end
+
+                selectedOption = selectedOption or fallbackOption
+            elseif type(values) == "string" then
+                selectedOption = values
+            end
+
+            ufoSelectedChickenId = selectedOption and ufoChickenOptionToId[selectedOption] or nil
+
+            local normalizedSelection = {}
+            if selectedOption then
+                normalizedSelection[selectedOption] = true
+            end
+
+            ufoChickenSelectionUpdating = true
+            pcall(function()
+                ufoChickenDropdown:SetValue(normalizedSelection)
+            end)
+            ufoChickenSelectionUpdating = false
         end
     })
 
@@ -2210,8 +2187,6 @@
                     local playerHumanoid = playerCharacter and playerCharacter:FindFirstChildOfClass("Humanoid")
 
                     if playerHumanoid and playerHumanoid.Health > 0 then
-                        -- Standstill: do not MoveTo the egg. Trigger the egg's normal
-                        -- touch pickup directly from the player's current position.
                         local ownedEggs = getOwnedEggs()
 
                         for _, eggInstance in ipairs(ownedEggs) do
@@ -2232,11 +2207,6 @@
     end)
 
 
-    -- AUTO HOT EGG
-    -- Normal event system: no Tower/Rebirth priority and no remote is fired for the egg.
-    -- HOT EGG start/end is detected from the game's HotEgg remotes, with
-    -- LiveEventGetActive used as an additional state check when its payload exposes
-    -- a HOT EGG identifier.
     local hotEggEventActive = false
     local hotEggLastEventCheck = 0
     local hotEggRemoteHooksInstalled = false
@@ -2307,8 +2277,6 @@
             return true
         end
 
-        -- Some game objects expose the egg name through an attribute instead of
-        -- putting it directly in Instance.Name.
         for _, attributeName in ipairs({ "EggName", "eggName", "Egg", "egg" }) do
             local ok, value = pcall(function()
                 return instance:GetAttribute(attributeName)
@@ -2357,7 +2325,6 @@
     end
 
     local function findBlazingEgg()
-        -- Fast path: exact names first.
         for _, name in ipairs({ "BlazingEgg", "Blazing Egg", "HotEgg", "Hot Egg" }) do
             local exact = workspace:FindFirstChild(name, true)
             if exact and isHotEggObject(exact) then
@@ -2368,7 +2335,6 @@
             end
         end
 
-        -- Fallback: scan the live workspace for a named HOT/Blazing egg.
         for _, instance in ipairs(workspace:GetDescendants()) do
             if isHotEggObject(instance) then
                 local position = getInstancePosition(instance)
@@ -2397,7 +2363,6 @@
         local centerX = floor and floor.Position.X or 0
         local centerZ = floor and floor.Position.Z or 0
 
-        -- Central arena is 80x80. Stand slightly inside the boundary.
         local edge = 38
         local minX = centerX - edge
         local maxX = centerX + edge
@@ -2494,7 +2459,6 @@
             end)
         end
 
-        -- Keep the same LiveEvent signal style used by UFO as a fallback.
         local function hookLiveSignal(name, isEnd)
             local remote = remotes:FindFirstChild(name)
             if not remote or not remote:IsA("RemoteEvent") then
@@ -2549,14 +2513,10 @@
             while getgenv().autoHotEggEnabled do
                 hookHotEggEventRemotes()
 
-                -- Same state-query idea as UFO, but matching HOT EGG instead.
                 if os.clock() - hotEggLastEventCheck >= 0.75 then
                     hotEggLastEventCheck = os.clock()
 
                     local activeSaysHotEgg = queryLiveEventForHotEgg()
-                    -- Only a positive HOT EGG result is allowed to start the loop.
-                    -- A false/unknown result is not treated as an end signal because
-                    -- HotEggFinale is the authoritative HOT EGG end signal.
                     if activeSaysHotEgg == true then
                         hotEggEventActive = true
                     end
@@ -2572,18 +2532,12 @@
                             local _, eggPosition = findBlazingEgg()
 
                             if eggPosition then
-                                -- Walk into the egg so the normal game touch/pickup
-                                -- behavior puts it on the player's head.
                                 moveHotEggCharacterTo(humanoid, eggPosition, 10)
                             end
                         else
                             local edgePosition = getNearestArenaEdgePosition(root.Position)
 
                             if edgePosition then
-                                -- Move to the nearest edge, then stay there while the
-                                -- egg is still attached. After a meteor drops it,
-                                -- isHoldingHotEgg() becomes false and the loop goes
-                                -- back to find and pick it up again.
                                 moveHotEggCharacterTo(humanoid, edgePosition, 8)
 
                                 while getgenv().autoHotEggEnabled
@@ -2638,9 +2592,6 @@
         startAutoHotEggLoop()
     end)
 
-    -- AUTO PROMOTE
-    -- Target chickens are tracked by their unique inventory id, so chickens with
-    -- the same name but different stars (or even identical name/star) remain separate.
     local autoPromoteChildren = {}
     local autoPromoteRefreshButton = nil
     local autoPromoteToggle = nil
@@ -2732,8 +2683,6 @@
         local liveIds = {}
         local chickens = table.clone(roster.chickens or {})
 
-        -- Keep the exact order supplied by the game's roster/inventory data.
-        -- Do not alphabetically sort the chicken list.
         for _, chicken in ipairs(chickens) do
             if chicken and chicken.id ~= nil then
                 local id = tostring(chicken.id)
@@ -2791,7 +2740,6 @@
             return false
         end
 
-        -- Never consume another chicken the user explicitly selected as an Auto Promote target.
         if isAutoPromoteTargetSelected(dupe.id) then
             return false
         end
@@ -2939,15 +2887,10 @@
         end
     })
 
-    -- Keep the main Toggle as the collapse/expand control.
     table.insert(autoPromoteChildren, autoPromoteChickenDropdown)
     table.insert(autoPromoteChildren, autoPromoteRefreshButton)
     addCollapseArrow(AutoPromote, autoPromoteChildren, "อัพดาวอัตโนมัติ")
-    -- Refresh the chicken Dropdown only when the manual refresh button is pressed.
 
-    -- AUTO SELL
-    -- Everything below belongs to the main "ขายไก่อัตโนมัติ" group.
-    -- The three sub-groups can each be expanded/collapsed independently.
 
     local function normalizeAutoSellKey(value)
         if value == nil then
@@ -2978,12 +2921,10 @@
             return false
         end
 
-        -- Favorites are already protected by the game.
         if chicken.favorite == true then
             return false
         end
 
-        -- Never sell the currently active chicken.
         if roster and chicken.id == roster.activeId then
             return false
         end
@@ -2993,12 +2934,10 @@
             return false
         end
 
-        -- Keep-rarity has priority over sell-rarity.
         if getgenv().autoSellKeepRarities[rarity] == true then
             return false
         end
 
-        -- Keep-status also has priority over selling.
         local mutation = getAutoSellMutation(chicken)
         if mutation ~= "" and getgenv().autoSellKeepMutations[mutation] == true then
             return false
@@ -3012,7 +2951,6 @@
             return false
         end
 
-        -- If nothing is selected in "เลือกระดับที่จะขาย", sell nothing.
         if not hasAutoSellRuleSelected() then
             return false
         end
@@ -3189,7 +3127,6 @@
 
     setupDropdownInteraction(AutoSellKeepStatusDropdown)
 
-    -- The main Toggle remains the only collapse/expand control.
     autoSellChildren = {
         AutoSellRarityDropdown,
         AutoSellKeepRarityDropdown,
@@ -3198,7 +3135,6 @@
 
     addCollapseArrow(AutoSell, autoSellChildren, "ขายไก่อัตโนมัติ")
 
-    -- AUTO PET
     getgenv().autoPetDelay = getgenv().autoPetDelay or 0.5
 
     local AutoPet = Tabs.Farm:AddToggle("AutoPet", {
@@ -3255,6 +3191,8 @@
             end
         end
     })
+
+    shrinkInputField(AutoPetDelayInput, 70)
 
     local AutoScrap = Tabs.Farm:AddToggle("AutoScrap", {
         Title = "เก็บเศษเหล็กอัตโนมัติ",
@@ -3327,7 +3265,6 @@
         end
     end)
 
-    -- ARENA TAB
     local AutoArena = Tabs.Arena:AddToggle("AutoArena", {
         Title = "ลงอารีน่าอัตโนมัติ",
         Default = false
@@ -3345,8 +3282,6 @@
                         local remotes = replicatedStorage:FindFirstChild("Remotes")
                         local arenaFight = remotes and remotes:FindFirstChild("ArenaFight")
 
-                        -- Only attempt Fight. If Fight is not currently available,
-                        -- InvokeServer errors and the loop simply waits for the next check.
                         if arenaFight and arenaFight:IsA("RemoteFunction") then
                             arenaFight:InvokeServer()
                         end
@@ -3360,9 +3295,6 @@
         end
     end)
 
-    -- When the configured Rebirth Limit is reached, fully switch OFF both
-    -- Tower and Auto Rebirth. They can only run again after the user enables
-    -- the toggle again, and each re-enable checks the limit first.
     function disableTowerRebirthAtLimit()
         getgenv().autoTowerEnabled = false
         getgenv().autoRebirthEnabled = false
@@ -3380,8 +3312,6 @@
             end
         end)
 
-        -- Limit is one-use: reset it to 0 immediately after the limit is reached.
-        -- This lets the next session start with an unlimited/default limit.
         getgenv().rebirthLimit = 0
         pcall(function()
             if RebirthLimitInput then
@@ -3391,14 +3321,11 @@
     end
 
 
-    -- Grouped toggles: row click = expand/collapse, switch click = ON/OFF.
     addCollapseArrow(AutoTower, {TowerDelayInput, LastTower}, "ลงหอคอยอัตโนมัติ")
     addCollapseArrow(AutoRebirth, {RebirthLimitInput}, "รีเบิร์ธอัตโนมัติ")
     addCollapseArrow(AutoPet, {AutoPetDelayInput}, "ลูบไก่อัตโนมัติ")
     addCollapseArrow(AutoUFO, {ufoChickenDropdown, ufoChickenRefreshButton}, "ลง UFO อัตโนมัติ")
 
-    -- Every other Toggle in the script uses the same separate switch hitbox.
-    -- Clicking its label/row no longer changes ON/OFF.
     setupToggleInteraction(LastTower)
     setupToggleInteraction(AutoBuyFeeder)
     setupToggleInteraction(AutoUpgradeFeeder)
