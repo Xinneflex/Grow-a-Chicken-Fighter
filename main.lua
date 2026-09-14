@@ -9,11 +9,11 @@
 
     local Window = Fluent:CreateWindow({
         Title = "Grow a Chicken Fighter",
-        SubTitle = "by qtieq",
+        SubTitle = "by Xinneflex",
         Search = true,
         Icon = "egg",
         TabWidth = 160,
-        Size = UDim2.fromOffset(500, 300),
+        Size = UDim2.fromOffset(450, 300),
         -- Put every Dropdown popup outside the window, on the right edge,
         -- vertically centered with the UI. FluentPlus handles the positioning.
         DropdownsOutsideWindow = true,
@@ -28,9 +28,6 @@
         UserInfoSubtitleColor = Color3.fromRGB(140, 210, 255)
     })
 
-    -- UI ONLY: fit the window to a phone in landscape without changing gameplay logic.
-    -- The iPhone XR landscape viewport is used as the reference: leave only a small
-    -- top/bottom margin, using the smaller 464x368 UI window.
     task.defer(function()
         pcall(function()
             local camera = workspace.CurrentCamera
@@ -1676,7 +1673,7 @@
                 for _, guiChild in ipairs(Fluent.GUI:GetDescendants()) do
                     if guiChild:IsA("Frame")
                         and guiChild ~= popupFrame
-                        and guiChild.Size.X.Offset == 500
+                        and guiChild.Size.X.Offset == 450
                         and guiChild.Size.Y.Offset == 300 then
                         windowFrame = guiChild
                         break
